@@ -232,15 +232,17 @@ static void bt_reader_task(void *arg)
     }
 
     while (!bt_flag_get(FLAG_STOP_READER)) {
+        /* Pause: chờ resume, không đọc file */
         if (bt_flag_get(FLAG_PAUSED)) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
 
-        /* Đọc PCM từ decoder */
+        /* Gọi decoder đọc PCM data */
         int rd = s_decoder->read(buf, READ_CHUNK_SIZE);
         if (rd <= 0) break;
 
+        /* Ghi vào stream buffer, retry nếu buffer đầy */
         size_t offset = 0;
         while (offset < (size_t)rd && !bt_flag_get(FLAG_STOP_READER)) {
             size_t written = xStreamBufferSend( s_stream_buf,
@@ -260,6 +262,12 @@ static void bt_reader_task(void *arg)
 
     free(buf);
 
+    /*
+     * Nếu thoát loop do end of stream (không phải force stop):
+     *   - Set FLAG_EOS → a2dp_data_cb biết không còn data mới
+     *   - Set FLAG_PREFILLED nếu chưa → cho phép phát nốt data còn trong buffer
+     *     (dùng cho trường hợp file ngắn hơn PREFILL_SIZE)
+     */
     if (!bt_flag_get(FLAG_STOP_READER)) {
         bt_flag_set(FLAG_END_OF_STREAM);
         if (!bt_flag_get(FLAG_PREFILLED) && s_stream_buf) {
@@ -282,6 +290,7 @@ static void bt_stop_reader(void)
     for (int i = 0; i < 10 && s_reader_task; i++)
         vTaskDelay(pdMS_TO_TICKS(10));
 
+    /* force delete nếu task không thoát đúng hạn */
     if (s_reader_task) {
         vTaskDelete(s_reader_task);
         s_reader_task = NULL;
@@ -310,27 +319,50 @@ static void bt_cleanup_resource_playback(void)
     }
 }
 
-/* ─── A2DP data callback ─────────────────────────────────────────────────── */
-
+/* ─── A2DP data callback ─────────────────────────────────────────────────── *
+ *
+ * Gọi bởi BT stack mỗi khi cần data để encode SBC.
+ * Tần suất: ~7ms (phụ thuộc SBC frame size và bitpool).
+ * Phải return nhanh — không block, không malloc, không log (trừ warning).
+ *
+ * Params:
+ *   out: buffer để ghi PCM data vào (BT stack sẽ encode SBC từ đây)
+ *   len: số bytes cần ghi (thường ~512-2048 bytes)
+ *
+ * Return: luôn return len (BT stack cần đúng số byte yêu cầu).
+ * Nếu không đủ data thì cần padding zero (silence).
+ */
 static int32_t bt_audio_a2dp_data_cb(uint8_t *out, int32_t len)
 {
     if (!out || len <= 0) return 0;
 
     uint32_t flags = atomic_load(&s_flags);
 
+    /* Output silence nếu:
+     *   - Chưa có stream buffer
+     *   - Chưa prefill đủ (tránh underrun)
+     *   - Đang pause
+     */
     if (!s_stream_buf || !(flags & FLAG_PREFILLED) || (flags & FLAG_PAUSED)) {
         memset(out, 0, len);
         return len;
     }
 
+     /* Lấy PCM data từ stream buffer (non-blocking, timeout = 0) */
     size_t got = xStreamBufferReceive(s_stream_buf, out, (size_t)len, 0);
     if (got > 0) atomic_fetch_add(&s_bytes_played, (uint_fast32_t)got);
     else ESP_LOGW(TAG, "CB: underrun (%ld requested)", (long)len);
 
+    /* Padding silence nếu buffer không đủ data (underrun) */
     if ((int32_t)got < len) memset(out + got, 0, len - got);
+
+    /* Apply software volume */
     bt_apply_volume(out, (size_t)len, s_volume);
+
+    /* Bắn sự kiện DATA_UPDATE event */
     bt_notify_signal(BT_AUDIO_EVT_DATA_UPDATE);
 
+    /* Check end of stream */
     if ((flags & FLAG_END_OF_STREAM) && xStreamBufferBytesAvailable(s_stream_buf) == 0) {
         bt_flag_clear(FLAG_END_OF_STREAM);
         esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
@@ -375,11 +407,13 @@ static void bt_audio_a2dp_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param
     case ESP_A2D_AUDIO_STATE_EVT: {
         switch (param->audio_stat.state) {
         case ESP_A2D_AUDIO_STATE_STARTED:
+            /* BT sink accept stream → bắt đầu phát */
             ESP_LOGI(TAG, "Audio stream started");
             bt_set_state(BT_AUDIO_STATE_PLAYING);
             break;
 
         case ESP_A2D_AUDIO_STATE_STOPPED:
+            /* Stream dừng (do bt_audio_stop() hoặc auto stop sau track finished) */
             ESP_LOGI(TAG, "Audio stream stopped");
             bt_cleanup_resource_playback();
             bt_set_state(BT_AUDIO_STATE_IDLE);
@@ -592,6 +626,7 @@ esp_err_t bt_audio_init(const char *device_name)
 
     bt_set_state(BT_AUDIO_STATE_IDLE);
 
+    /* Đăng ký decoder interface */
     s_registry_count = 0;
     const char *wav_ext[] = {"wav"};
     bt_audio_register_decoder(&bt_audio_wav_decoder, wav_ext, 1);
@@ -619,6 +654,7 @@ void bt_audio_start_discovery(bool auto_connect)
     memset(s_disc_list, 0, sizeof(s_disc_list));
     taskEXIT_CRITICAL(&s_disc_mux);
 
+    /* 10 inquiry cycles ≈ 12 giây */
     esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 10, 0);
 }
 
@@ -654,6 +690,7 @@ esp_err_t bt_audio_discovery_get_results(uint16_t *count, bt_audio_discovered_de
     return ESP_OK;
 }
 
+/** In danh sách discovery ra serial log dạng bảng. */
 void bt_audio_discovery_print(void)
 {
     taskENTER_CRITICAL(&s_disc_mux);
@@ -735,27 +772,36 @@ esp_err_t bt_audio_play(const char *path)
 {
     if (!path) return ESP_ERR_INVALID_ARG;
     if (!s_device.connected) return ESP_ERR_INVALID_STATE;
+
+    /* Stop bài đang phát (nếu có) trước khi play bài mới */
     if (s_reader_task || s_stream_buf) bt_audio_stop();
 
+    /* Tìm decoder phù hợp với extension của file. Ví dụ: *.wav, *.raw,... */
     const bt_audio_decoder_t *dec = bt_find_decoder(path);
     if (!dec) {
         ESP_LOGE(TAG, "No decoder for '%s'", path);
         return ESP_ERR_NOT_SUPPORTED;
     }
 
+    /* Open file và lấy thông tin như kích thước pcm, sample rate,
+     * số channel, một sample chứa bao nhiêu bit
+     */
     bt_audio_file_info_t info = {0};
     esp_err_t ret = dec->open(path, &info);
     if (ret != ESP_OK) return ret;
 
+    /* Tạo streambuffer để truyền nhận dữ liệu realtime giữa consumer và provider */
     StreamBufferHandle_t buf = xStreamBufferCreate(BUF_SIZE, BT_AUDIO_FRAME_SIZE);
     if (!buf) { dec->close(); return ESP_ERR_NO_MEM; }
 
+    /* Setup state cho playback mới */
     s_stream_buf = buf;
     s_decoder    = dec;
     s_total_pcm  = info.total_pcm_bytes;
     atomic_store(&s_bytes_played, 0);
     atomic_store(&s_flags, 0);
 
+    /* Tạo reader task — bắt đầu đọc file */
     if (xTaskCreatePinnedToCore(bt_reader_task, "reader_task",
                                 READER_TASK_STACK, NULL,
                                 READER_TASK_PRIO, &s_reader_task, 1) != pdPASS) {
@@ -766,6 +812,7 @@ esp_err_t bt_audio_play(const char *path)
         return ESP_ERR_NO_MEM;
     }
 
+    /* Gửi lệnh media ctrl start đến BT Stack để bắt đầu gửi data PCM */
     esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
 
     ESP_LOGI(TAG, "Play [%s]: '%s' (%.1fs)", dec->name, path, s_total_pcm ? (float)s_total_pcm / BT_AUDIO_BITRATE : 0.0f);
@@ -789,6 +836,7 @@ void bt_audio_stop(void)
 {
     bt_stop_reader();
 
+    /* Gửi lệnh media ctrl stop đến BT Stack để yêu cầu dừng gửi data PCM */
     esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
 }
 
@@ -796,14 +844,18 @@ void bt_audio_seek(uint32_t position_ms)
 {
     if (!s_stream_buf || !s_decoder || !s_decoder->seek) return;
 
+    /* Tính toán offset trong file tương ứng với `position_ms` */
     uint32_t offset = (uint32_t)((uint64_t)position_ms * BT_AUDIO_BITRATE / 1000);
     offset = (offset / BT_AUDIO_FRAME_SIZE) * BT_AUDIO_FRAME_SIZE;
     if (offset > s_total_pcm) offset = s_total_pcm;
 
+    /* Tạm thời pause để thực hiện seek tới offset */
     bool was_paused = bt_flag_get(FLAG_PAUSED);
     if (!was_paused) bt_flag_set(FLAG_PAUSED);
 
     if (s_decoder->seek(offset) == ESP_OK) {
+
+        // Xóa dữ liệu cũ trong stream buffer để tránh phát lại
         bt_flag_clear(FLAG_PREFILLED | FLAG_END_OF_STREAM);
         xStreamBufferReset(s_stream_buf);
         atomic_store(&s_bytes_played, (uint_fast32_t)offset);

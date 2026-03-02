@@ -6,6 +6,13 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+#define BT_AUDIO_MODE_SINK      0
+#define BT_AUDIO_MODE_SOURCE    1
+
+#ifndef BT_AUDIO_MODE
+#define BT_AUDIO_MODE           BT_AUDIO_MODE_SOURCE
+#endif /* BT_AUDIO_MODE */
+
 #define BT_AUDIO_SAMPLE_RATE    44100
 #define BT_AUDIO_CHANNELS       2
 #define BT_AUDIO_BITS           16
@@ -87,7 +94,7 @@ typedef struct {
 /* ─── State machine ───────────────────────────────────────────────────────── */
 
 typedef enum {
-    BT_AUDIO_STATE_IDLE,            /**<  */
+    BT_AUDIO_STATE_IDLE,
     BT_AUDIO_STATE_DISCOVERING,     /**< Đang quét thiết bị */
     BT_AUDIO_STATE_DISCOVERY_DONE,  /**< Đã quét xong */
     BT_AUDIO_STATE_CONNECTING,      /**< Đang kết nối đến thiết bị */
@@ -100,16 +107,16 @@ typedef enum {
 /* ─── Event system ────────────────────────────────────────────────────────── */
 
 typedef enum {
-    BT_AUDIO_EVT_STATE_CHANGED,     /**< State machine thay đổi */
+    BT_AUDIO_EVT_STATE_CHANGED,     /**< Trạng thái audio thay đổi */
     BT_AUDIO_EVT_DISCOVERY_RESULT,  /**< Tìm thấy thiết bị mới */
     BT_AUDIO_EVT_DATA_UPDATE,
-    BT_AUDIO_EVT_TRACK_FINISHED,    /**< Buffer đã drain hết — track phát xong */
+    BT_AUDIO_EVT_TRACK_FINISHED,    /**< Track phát xong */
 } bt_audio_evt_type_t;
 
 typedef struct {
     bt_audio_evt_type_t type;       /**< Loại event */
     const void         *data;       /**< Pointer đến event data, NULL nếu không có */
-    size_t              data_size;  /**< Kích thước data (bytes) — dùng để validate */
+    size_t              data_size;  /**< Kích thước data (bytes) */
 } bt_audio_event_t;
 
 typedef struct {
@@ -120,7 +127,7 @@ typedef struct {
 /**
  * @brief Callback thông báo events.
  *
- * Được gọi từ BT task context. Callback nên return nhanh, không block.
+ * Được gọi từ BT task. Callback cần thực hiện nhanh chóng, không block.
  */
 typedef void (*bt_audio_event_cb_t)(const bt_audio_event_t *event);
 
