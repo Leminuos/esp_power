@@ -19,14 +19,14 @@
 #define BT_AUDIO_BITRATE        (BT_AUDIO_SAMPLE_RATE * BT_AUDIO_CHANNELS * (BT_AUDIO_BITS / 8))
 #define BT_AUDIO_FRAME_SIZE     (BT_AUDIO_CHANNELS * (BT_AUDIO_BITS / 8))
 
+#define BT_AUDIO_TITLE_MAX      128
+
 /**
  * @brief Thông tin file audio — decoder trả về sau khi open.
  */
 typedef struct {
-    uint32_t    total_pcm_bytes;    /**< Tổng PCM data (bytes), 0 nếu không biết */
-    uint32_t    sample_rate;        /**< Sample rate (Hz) */
-    uint16_t    channels;           /**< Số kênh */
-    uint16_t    bits_per_sample;    /**< Bits per sample */
+    uint32_t total_pcm_bytes;           /**< Kích thước PCM data (bytes) */
+    char     title[BT_AUDIO_TITLE_MAX]; /**< Tên bài hát */
 } bt_audio_file_info_t;
 
 /**
@@ -181,6 +181,7 @@ void      bt_audio_seek(uint32_t position_ms);
 void      bt_audio_set_volume(uint8_t volume_pct);
 uint8_t   bt_audio_get_volume(void);
 
+const char *bt_audio_get_title(void);
 esp_err_t bt_audio_get_position(bt_audio_playback_pos_t *pos);
 esp_err_t bt_audio_get_device_info(bt_audio_device_info_t *info);
 

@@ -57,7 +57,7 @@ static volatile int                 s_state         = BT_AUDIO_STATE_IDLE;
 static bt_audio_device_info_t       s_device        = {0};
 static bt_audio_event_cb_t          s_event_cb      = NULL;
 static StreamBufferHandle_t         s_stream_buf    = NULL;
-static uint32_t                     s_total_pcm     = 0;
+static bt_audio_file_info_t         s_file_info     = {0};
 
 /* Reader task */
 static TaskHandle_t                 s_reader_task     = NULL;
@@ -311,7 +311,8 @@ static void bt_cleanup_resource_playback(void)
 
     atomic_store(&s_flags, 0);
     atomic_store(&s_bytes_played, 0);
-    s_total_pcm = 0;
+    s_file_info.total_pcm_bytes = 0;
+    s_file_info.title[0] = '\0';
 
     if (s_stream_buf) {
         vStreamBufferDelete(s_stream_buf);
@@ -617,12 +618,14 @@ esp_err_t bt_audio_init(const char *device_name)
     /* 8. Reset state */
     s_state      = BT_AUDIO_STATE_IDLE;
     s_volume     = 100;
-    s_total_pcm  = 0;
     s_decoder    = NULL;
     s_disc_count = 0;
     atomic_store(&s_bytes_played, 0);
     atomic_store(&s_flags, 0);
     memset(&s_device, 0, sizeof(s_device));
+
+    s_file_info.total_pcm_bytes  = 0;
+    memset(&s_file_info.title, 0, sizeof(s_file_info.title));
 
     bt_set_state(BT_AUDIO_STATE_IDLE);
 
@@ -786,8 +789,7 @@ esp_err_t bt_audio_play(const char *path)
     /* Open file và lấy thông tin như kích thước pcm, sample rate,
      * số channel, một sample chứa bao nhiêu bit
      */
-    bt_audio_file_info_t info = {0};
-    esp_err_t ret = dec->open(path, &info);
+    esp_err_t ret = dec->open(path, &s_file_info);
     if (ret != ESP_OK) return ret;
 
     /* Tạo streambuffer để truyền nhận dữ liệu realtime giữa consumer và provider */
@@ -797,7 +799,6 @@ esp_err_t bt_audio_play(const char *path)
     /* Setup state cho playback mới */
     s_stream_buf = buf;
     s_decoder    = dec;
-    s_total_pcm  = info.total_pcm_bytes;
     atomic_store(&s_bytes_played, 0);
     atomic_store(&s_flags, 0);
 
@@ -815,7 +816,7 @@ esp_err_t bt_audio_play(const char *path)
     /* Gửi lệnh media ctrl start đến BT Stack để bắt đầu gửi data PCM */
     esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
 
-    ESP_LOGI(TAG, "Play [%s]: '%s' (%.1fs)", dec->name, path, s_total_pcm ? (float)s_total_pcm / BT_AUDIO_BITRATE : 0.0f);
+    ESP_LOGI(TAG, "Play [%s]: '%s' (%.1fs)", dec->name, path, s_file_info.total_pcm_bytes ? (float)s_file_info.total_pcm_bytes / BT_AUDIO_BITRATE : 0.0f);
 
     return ESP_OK;
 }
@@ -847,7 +848,7 @@ void bt_audio_seek(uint32_t position_ms)
     /* Tính toán offset trong file tương ứng với `position_ms` */
     uint32_t offset = (uint32_t)((uint64_t)position_ms * BT_AUDIO_BITRATE / 1000);
     offset = (offset / BT_AUDIO_FRAME_SIZE) * BT_AUDIO_FRAME_SIZE;
-    if (offset > s_total_pcm) offset = s_total_pcm;
+    if (offset > s_file_info.total_pcm_bytes) offset = s_file_info.total_pcm_bytes;
 
     /* Tạm thời pause để thực hiện seek tới offset */
     bool was_paused = bt_flag_get(FLAG_PAUSED);
@@ -871,8 +872,8 @@ esp_err_t bt_audio_get_position(bt_audio_playback_pos_t *pos)
     uint32_t played = (uint32_t)atomic_load(&s_bytes_played);
 
     pos->position_ms  = (uint32_t)((uint64_t)played * 1000 / BT_AUDIO_BITRATE);
-    pos->duration_ms  = s_total_pcm ? (uint32_t)((uint64_t)s_total_pcm * 1000 / BT_AUDIO_BITRATE) : 0;
-    pos->progress_pct = s_total_pcm ? (uint8_t)((uint64_t)played * 100 / s_total_pcm) : 0;
+    pos->duration_ms  = s_file_info.total_pcm_bytes ? (uint32_t)((uint64_t)s_file_info.total_pcm_bytes * 1000 / BT_AUDIO_BITRATE) : 0;
+    pos->progress_pct = s_file_info.total_pcm_bytes ? (uint8_t)((uint64_t)played * 100 / s_file_info.total_pcm_bytes) : 0;
 
     return ESP_OK;
 }
@@ -900,3 +901,5 @@ esp_err_t bt_audio_get_device_info(bt_audio_device_info_t *info)
     memcpy(info, &s_device, sizeof(*info));
     return ESP_OK;
 }
+
+const char *bt_audio_get_title(void) { return s_file_info.title; }
