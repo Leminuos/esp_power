@@ -61,3 +61,9 @@ void cb_slider_volume(lv_event_t *e) {
 
     bt_audio_set_volume(vol);
 }
+
+extern void ui_bt_select_start_scan(void);
+
+void cb_rescan_clicked(lv_event_t *e) {
+    ui_bt_select_start_scan();
+}

@@ -20,6 +20,7 @@ extern "C" {
 
 #include "screens/ui_explorer.h"
 #include "screens/ui_audioplayer.h"
+#include "screens/ui_bt_select.h"
 
 ///////////////////// VARIABLES ////////////////////
 
@@ -37,6 +38,7 @@ void cb_btn_prev(lv_event_t *e);
 void cb_btn_next(lv_event_t *e);
 void cb_slider_progress(lv_event_t *e);
 void cb_slider_volume(lv_event_t *e);
+void cb_rescan_clicked(lv_event_t *e);
 
 #ifdef __cplusplus
 } /*extern "C"*/

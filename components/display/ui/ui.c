@@ -32,8 +32,9 @@ void ui_init(void)
     lv_disp_set_theme(dispp, theme);
     ui_explorer_screen_init();
     ui_audioplayer_screen_init();
+    ui_bt_select_screen_init();
     ui____initial_actions0 = lv_obj_create(NULL);
-    lv_disp_load_scr(ui_explorer);
+    lv_disp_load_scr(ui_bt_select);
 }
 
 void ui_destroy(void)

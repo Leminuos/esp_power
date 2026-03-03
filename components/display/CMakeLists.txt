@@ -6,6 +6,7 @@ idf_component_register(
         "ui/ui_events.c"
         "ui/screens/ui_explorer.c"
         "ui/screens/ui_audioplayer.c"
+        "ui/screens/ui_bt_select.c"
 
     INCLUDE_DIRS "include" "ui" "ui/screens"
     
