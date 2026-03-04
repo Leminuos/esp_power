@@ -71,12 +71,12 @@ void ui_bt_select_screen_init(void) {
     // --- Spinner ---
     spinner = lv_spinner_create(ui_bt_select);
     lv_obj_set_size(spinner, 30, 30);
-    lv_obj_align(spinner, LV_ALIGN_TOP_MID, 0, 55);
+    lv_obj_align(spinner, LV_ALIGN_BOTTOM_MID, 0, -10);
 
     // --- Device list panel ---
     panel_device_list = lv_obj_create(ui_bt_select);
-    lv_obj_set_size(panel_device_list, 280, 130);
-    lv_obj_align(panel_device_list, LV_ALIGN_CENTER, 0, 15);
+    lv_obj_set_size(panel_device_list, 280, 120);
+    lv_obj_align(panel_device_list, LV_ALIGN_CENTER, 0, 5);
     lv_obj_set_flex_flow(panel_device_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(panel_device_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(panel_device_list, 4, 0);
