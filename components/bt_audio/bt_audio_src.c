@@ -456,84 +456,126 @@ static void bt_audio_a2dp_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param
 
 /* ─── GAP callback ───────────────────────────────────────────────────────── */
 
+static bool bt_audio_check_bonded_devices(uint8_t* bda) {
+    int dev_num = esp_bt_gap_get_bond_device_num();
+    esp_bd_addr_t *dev_list = (esp_bd_addr_t *)malloc(dev_num * sizeof(esp_bd_addr_t));
+    
+    esp_bt_gap_get_bond_device_list(&dev_num, dev_list);
+
+    for (int i = 0; i < dev_num; i++) {
+        if (memcmp(bda, dev_list[i], 6) == 0) {
+            return true;
+        }
+    }
+
+    free(dev_list);
+    return false;
+}
+
+static void bt_audio_gap_disc_res_handle(esp_bt_gap_cb_param_t *param) {
+    int8_t   rssi  = -127;
+    uint32_t cod = 0;
+    uint8_t *eir = NULL;
+    uint8_t *bda = param->disc_res.bda;
+    char    name[ESP_BT_GAP_MAX_BDNAME_LEN + 1] = "";
+    
+    for (int i = 0; i < param->disc_res.num_prop; i++) {
+        esp_bt_gap_dev_prop_t *p = &param->disc_res.prop[i];
+
+        switch (p->type) {
+        case ESP_BT_GAP_DEV_PROP_BDNAME: {
+            int l = p->len;
+            if (l > ESP_BT_GAP_MAX_BDNAME_LEN) l = ESP_BT_GAP_MAX_BDNAME_LEN;
+            memcpy(name, p->val, l);
+            name[l] = '\0';
+            break;
+        }
+        case ESP_BT_GAP_DEV_PROP_EIR:
+            eir = (uint8_t*)p->val;
+            break;
+        case ESP_BT_GAP_DEV_PROP_RSSI:
+            if (p->len >= 1) rssi = *(int8_t *)p->val;
+            break;
+        case ESP_BT_GAP_DEV_PROP_COD:
+            if (p->len >= 4) cod = *(uint32_t *)p->val;
+            break;
+        default:
+            break;
+        }
+    }
+
+    if (name[0] == '\0') {
+        if (eir == NULL) {
+            const char * unk = "<unknown>";
+            memcpy(name, unk, strlen(unk));
+        }
+        else {
+            uint8_t *p_name = NULL;
+            uint8_t name_len = 0;
+
+            p_name = esp_bt_gap_resolve_eir_data(eir, ESP_BT_EIR_TYPE_CMPL_LOCAL_NAME, &name_len);
+            if (!p_name)
+                p_name = esp_bt_gap_resolve_eir_data(eir, ESP_BT_EIR_TYPE_SHORT_LOCAL_NAME, &name_len);
+
+            if (p_name && name_len > 0) {
+                if (name_len > 63) name_len = 63;
+                memcpy(name, p_name, name_len);
+                name[name_len] = '\0';
+            }
+        }
+    }
+
+    /* Filter: Audio/Video major class = 0x04 */
+    bool is_audio = ((cod >> 8) & 0x1F) == 0x04;
+
+    /* Bỏ qua thiết bị non-audio */
+    if (!is_audio) return;
+
+    /* Auto-connect: kết nối thiết bị audio đầu tiên tìm thấy */
+    if (s_auto_connect || bt_audio_check_bonded_devices(bda)) {
+        strncpy(s_device.name, name, sizeof(s_device.name) - 1);
+        esp_bt_gap_cancel_discovery();
+        esp_a2d_source_connect(bda);
+        return;
+    }
+
+    /* Manual mode: thêm vào danh sách discovery */
+    taskENTER_CRITICAL(&s_disc_mux);
+    {
+        /* Kiểm tra duplicate — cập nhật name/rssi nếu đã có */
+        bool dup = false;
+        for (int i = 0; i < s_disc_count; i++) {
+            if (memcmp(s_disc_list[i].bda, bda, 6) == 0) {
+                if (name[0] && !s_disc_list[i].name[0]) {
+                    strncpy(s_disc_list[i].name, name, sizeof(s_disc_list[i].name) - 1);
+                }
+                if (rssi > s_disc_list[i].rssi) {
+                    s_disc_list[i].rssi = rssi;
+                }
+                dup = true;
+                break;
+            }
+        }
+
+        if (!dup && s_disc_count < BT_AUDIO_MAX_DISCOVERED) {
+            bt_audio_discovered_dev_t *d = &s_disc_list[s_disc_count];
+            strncpy(d->name, name, sizeof(d->name) - 1);
+            memcpy(d->bda, bda, 6);
+            bt_format_bda(d->bda_str, sizeof(d->bda_str), bda);
+            d->rssi = rssi;
+            d->cod  = cod;
+            s_disc_count++;
+        }
+    }
+    taskEXIT_CRITICAL(&s_disc_mux);
+    bt_notify_signal(BT_AUDIO_EVT_DISCOVERY_RESULT);
+}
+
 static void bt_audio_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 {
     switch (event) {
     case ESP_BT_GAP_DISC_RES_EVT: {
-        uint8_t *bda = param->disc_res.bda;
-
-        char name[ESP_BT_GAP_MAX_BDNAME_LEN + 1] = "<unknown>";
-        int8_t rssi = -127;
-        uint32_t cod = 0;
-
-        for (int i = 0; i < param->disc_res.num_prop; i++) {
-            esp_bt_gap_dev_prop_t *p = &param->disc_res.prop[i];
-
-            switch (p->type) {
-            case ESP_BT_GAP_DEV_PROP_BDNAME: {
-                int l = p->len;
-                if (l > ESP_BT_GAP_MAX_BDNAME_LEN) l = ESP_BT_GAP_MAX_BDNAME_LEN;
-                memcpy(name, p->val, l);
-                name[l] = '\0';
-                break;
-            }
-            case ESP_BT_GAP_DEV_PROP_RSSI:
-                if (p->len >= 1) rssi = *(int8_t *)p->val;
-                break;
-            case ESP_BT_GAP_DEV_PROP_COD:
-                if (p->len >= 4) cod = *(uint32_t *)p->val;
-                break;
-            default:
-                break;
-            }
-        }
-
-        /* Filter: Audio/Video major class = 0x04 */
-        bool is_audio = ((cod >> 8) & 0x1F) == 0x04;
-
-        /* Bỏ qua thiết bị non-audio */
-        if (!is_audio) break;
-
-        /* Auto-connect: kết nối thiết bị audio đầu tiên tìm thấy */
-        if (s_auto_connect) {
-            strncpy(s_device.name, name, sizeof(s_device.name) - 1);
-            esp_bt_gap_cancel_discovery();
-            esp_a2d_source_connect(bda);
-            break;
-        }
-
-        /* Manual mode: thêm vào danh sách discovery */
-        taskENTER_CRITICAL(&s_disc_mux);
-        {
-            /* Kiểm tra duplicate — cập nhật name/rssi nếu đã có */
-            bool dup = false;
-            for (int i = 0; i < s_disc_count; i++) {
-                if (memcmp(s_disc_list[i].bda, bda, 6) == 0) {
-                    if (name[0] && !s_disc_list[i].name[0]) {
-                        strncpy(s_disc_list[i].name, name,
-                                sizeof(s_disc_list[i].name) - 1);
-                    }
-                    if (rssi > s_disc_list[i].rssi) {
-                        s_disc_list[i].rssi = rssi;
-                    }
-                    dup = true;
-                    break;
-                }
-            }
-
-            if (!dup && s_disc_count < BT_AUDIO_MAX_DISCOVERED) {
-                bt_audio_discovered_dev_t *d = &s_disc_list[s_disc_count];
-                strncpy(d->name, name, sizeof(d->name) - 1);
-                memcpy(d->bda, bda, 6);
-                bt_format_bda(d->bda_str, sizeof(d->bda_str), bda);
-                d->rssi = rssi;
-                d->cod  = cod;
-                s_disc_count++;
-            }
-        }
-        taskEXIT_CRITICAL(&s_disc_mux);
-        bt_notify_signal(BT_AUDIO_EVT_DISCOVERY_RESULT);
-
+        bt_audio_gap_disc_res_handle(param);
         break;
     }
 
@@ -545,6 +587,13 @@ static void bt_audio_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *
         else if (param->disc_st_chg.state == ESP_BT_GAP_DISCOVERY_STOPPED) {
             ESP_LOGI(TAG, "Discovery stopped");
             bt_set_state(BT_AUDIO_STATE_DISCOVERY_DONE);
+        }
+        break;
+
+    case ESP_BT_GAP_READ_REMOTE_NAME_EVT:
+        if (param->read_rmt_name.stat == ESP_BT_STATUS_SUCCESS) {
+            char* remote_name = (char*) param->read_rmt_name.rmt_name;
+            strncpy(s_device.name, remote_name, sizeof(s_device.name) - 1);
         }
         break;
 
@@ -823,6 +872,9 @@ esp_err_t bt_audio_connect(const uint8_t bda[6])
     esp_bt_gap_cancel_discovery();
 
     char bda_str[18];
+
+    // Request đọc device name
+    //esp_bt_gap_read_remote_name(bda);
     bt_format_bda(bda_str, sizeof(bda_str), bda);
     ESP_LOGI(TAG, "Connecting to %s ...", bda_str);
 
