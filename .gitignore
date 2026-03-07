@@ -1,7 +1,6 @@
 build
 managed_components
 .vscode/*.json
-sdkconfig
 sdkconfig.old
 *.lock
 components/display/ui/filelist.txt
