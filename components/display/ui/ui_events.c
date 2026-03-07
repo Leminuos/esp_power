@@ -7,7 +7,9 @@
 #include "bt_audio.h"
 
 bool ui_is_playing;
+bool ui_is_loop;
 extern lv_obj_t * lbl_volume_icon;
+extern lv_obj_t * lbl_loop;
 
 void cb_btn_back(lv_event_t *e) {
     lv_scr_load_anim(ui_explorer, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
@@ -37,6 +39,18 @@ void cb_btn_next(lv_event_t *e) {
     // TODO: audio_next();
 }
 
+void cb_btn_loop(lv_event_t *e) {
+    ui_is_loop = !ui_is_loop;
+
+    if (ui_is_loop) {
+        lv_obj_set_style_text_opa(lbl_loop, LV_OPA_COVER, 0);
+        lv_obj_set_style_text_color(lbl_loop, lv_color_hex(0x4FC3F7), 0);
+    } else {
+        lv_obj_set_style_text_opa(lbl_loop, LV_OPA_40, 0);
+        lv_obj_set_style_text_color(lbl_loop, lv_color_hex(0xFFFFFF), 0);
+    }
+}
+
 void cb_slider_progress(lv_event_t *e) {
     int pct = lv_slider_get_value(ui_sliderProgress);
     bt_audio_playback_pos_t p = {0};
@@ -62,8 +76,8 @@ void cb_slider_volume(lv_event_t *e) {
     bt_audio_set_volume(vol);
 }
 
-extern void ui_bt_select_start_scan(void);
+extern void ui_bt_start_scan(void);
 
 void cb_rescan_clicked(lv_event_t *e) {
-    ui_bt_select_start_scan();
+    ui_bt_start_scan();
 }

@@ -33,6 +33,7 @@ extern lv_obj_t * ui____initial_actions0;
 void ui_init(void);
 void ui_destroy(void);
 void cb_btn_back(lv_event_t *e);
+void cb_btn_loop(lv_event_t *e);
 void cb_btn_play_pause(lv_event_t *e);
 void cb_btn_prev(lv_event_t *e);
 void cb_btn_next(lv_event_t *e);

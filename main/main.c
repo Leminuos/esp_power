@@ -25,8 +25,8 @@ static const char* TAG = "main";
 static EventGroupHandle_t s_audio_event_group;
 static TaskHandle_t s_audio_task;
 
-extern void ui_bt_select_start_scan(void);
-extern void ui_refresh_bt_device_list(void);
+extern void ui_bt_start_scan(void);
+extern void ui_bt_stop_scan(void);
 extern void ui_refresh_file_list(const char *dir_path);
 
 static void ui_audio_task(void* param)
@@ -43,7 +43,7 @@ static void ui_audio_task(void* param)
 
         if (bits & UI_EVENT_BT_DISCOVERY_DONE) {
             if (display_port_lock(100)) {
-                ui_refresh_bt_device_list();
+                ui_bt_stop_scan();
                 display_port_unlock();
             }
         }
@@ -83,6 +83,8 @@ static void ui_audio_task(void* param)
         }
 
         if (bits & UI_EVENT_BT_DEVICE_DISCONNECTED) {
+            ui_bt_start_scan();
+            
             if (display_port_lock(100)) {
                 lv_scr_load_anim(ui_bt_select, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
                 display_port_unlock();
@@ -162,7 +164,7 @@ void app_main(void)
 
     if (display_port_lock(0)) {
         ui_init();
-        ui_bt_select_start_scan();
+        ui_bt_start_scan();
         display_port_unlock();
     } else {
         ESP_LOGE("app", "Failed to lock LVGL for screen creation");

@@ -10,9 +10,6 @@ lv_obj_t *spinner           = NULL;   // loading animation
 // Styles
 lv_style_t style_item;
 lv_style_t style_item_pressed;
-lv_style_t style_rssi_good;
-lv_style_t style_rssi_medium;
-lv_style_t style_rssi_weak;
 
 static lv_style_t style_screen;
 
@@ -37,16 +34,6 @@ static void init_bt_select_styles(void) {
     lv_style_init(&style_item_pressed);
     lv_style_set_bg_opa(&style_item_pressed, LV_OPA_30);
     lv_style_set_bg_color(&style_item_pressed, lv_color_hex(0x4FC3F7));
-
-    // RSSI colors
-    lv_style_init(&style_rssi_good);
-    lv_style_set_text_color(&style_rssi_good, lv_color_hex(0x4CAF50));     // xanh lá
-
-    lv_style_init(&style_rssi_medium);
-    lv_style_set_text_color(&style_rssi_medium, lv_color_hex(0xFFCC00));   // vàng
-
-    lv_style_init(&style_rssi_weak);
-    lv_style_set_text_color(&style_rssi_weak, lv_color_hex(0xFF5722));     // đỏ
 }
 
 void ui_bt_select_screen_init(void) {

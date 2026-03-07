@@ -6,26 +6,28 @@
 #include "../ui.h"
 
 lv_obj_t * uic_audioplayer;
-lv_obj_t * ui_audioplayer = NULL;
-lv_obj_t * ui_lblSongName      = NULL;
-lv_obj_t * ui_sliderProgress   = NULL;
-lv_obj_t * ui_lblTimeElapsed   = NULL;
-lv_obj_t * ui_lblTimeTotal     = NULL;
-lv_obj_t * ui_btnPlayPause     = NULL;
-lv_obj_t * ui_lblBtnPlayPause  = NULL;
-lv_obj_t * ui_sliderVolume     = NULL;
-lv_obj_t * lbl_volume_icon     = NULL;
+lv_obj_t * ui_audioplayer;
+lv_obj_t * ui_lblSongName;
+lv_obj_t * ui_sliderProgress;
+lv_obj_t * ui_lblTimeElapsed;
+lv_obj_t * ui_lblTimeTotal;
+lv_obj_t * ui_btnPlayPause;
+lv_obj_t * ui_lblBtnPlayPause;
+lv_obj_t * ui_sliderVolume;
+lv_obj_t * lbl_volume_icon;
+lv_obj_t * lbl_loop;
 
-static lv_obj_t * btn_back     = NULL;
-static lv_obj_t * btn_prev     = NULL;
-static lv_obj_t * btn_next     = NULL;
+static lv_obj_t * btn_back;
+static lv_obj_t * btn_prev;
+static lv_obj_t * btn_next;
+static lv_obj_t * btn_loop;
 
 // Styles
 static lv_style_t style_screen_bg;
 static lv_style_t style_song_name;
 static lv_style_t style_ctrl_btn;
 static lv_style_t style_ctrl_btn_pressed;
-static lv_style_t style_back_btn;
+static lv_style_t style_ctrl_btn_pressed_2;
 static lv_style_t style_progress_main;
 static lv_style_t style_progress_indicator;
 static lv_style_t style_progress_knob;
@@ -40,7 +42,7 @@ static void init_player_styles(void) {
     lv_style_init(&style_song_name);
     lv_style_set_text_color(&style_song_name, lv_color_hex(0xFFFFFF));
 
-    // --- Control buttons (play, prev, next) ---
+    // --- Buttons ---
     lv_style_init(&style_ctrl_btn);
     lv_style_set_bg_opa(&style_ctrl_btn, LV_OPA_TRANSP);
     lv_style_set_border_width(&style_ctrl_btn, 0);
@@ -52,12 +54,10 @@ static void init_player_styles(void) {
     lv_style_set_bg_color(&style_ctrl_btn_pressed, lv_color_hex(0xFFFFFF));
     lv_style_set_radius(&style_ctrl_btn_pressed, LV_RADIUS_CIRCLE);
 
-    // --- Back button ---
-    lv_style_init(&style_back_btn);
-    lv_style_set_bg_opa(&style_back_btn, LV_OPA_TRANSP);
-    lv_style_set_border_width(&style_back_btn, 0);
-    lv_style_set_shadow_width(&style_back_btn, 0);
-    lv_style_set_text_color(&style_back_btn, lv_color_hex(0xAAAAAA));
+    lv_style_init(&style_ctrl_btn_pressed_2);
+    lv_style_set_bg_opa(&style_ctrl_btn_pressed_2, LV_OPA_20);
+    lv_style_set_bg_color(&style_ctrl_btn_pressed, lv_color_hex(0xFFFFFF));
+    lv_style_set_radius(&style_ctrl_btn_pressed, 5);
 
     // --- Progress bar: track (nền) ---
     lv_style_init(&style_progress_main);
@@ -95,13 +95,31 @@ void ui_audioplayer_screen_init(void)
     btn_back = lv_btn_create(ui_audioplayer);
     lv_obj_set_size(btn_back, 40, 30);
     lv_obj_align(btn_back, LV_ALIGN_TOP_LEFT, 5, 5);
-    lv_obj_add_style(btn_back, &style_back_btn, LV_STATE_DEFAULT);
+    lv_obj_add_style(btn_back, &style_ctrl_btn, LV_STATE_DEFAULT);
+    lv_obj_add_style(btn_back, &style_ctrl_btn_pressed_2, LV_STATE_PRESSED);
 
     lv_obj_t *lbl_back = lv_label_create(btn_back);
     lv_label_set_text(lbl_back, LV_SYMBOL_LEFT);
     lv_obj_center(lbl_back);
 
     lv_obj_add_event_cb(btn_back, cb_btn_back, LV_EVENT_CLICKED, NULL);
+
+    // ============================================================
+    // Loop button (góc phải trên)
+    // ============================================================
+    
+    btn_loop = lv_btn_create(ui_audioplayer);
+    lv_obj_set_size(btn_loop, 40, 30);
+    lv_obj_align(btn_loop, LV_ALIGN_TOP_RIGHT, -5, 5);
+    lv_obj_add_style(btn_loop, &style_ctrl_btn, LV_STATE_DEFAULT);
+    lv_obj_add_style(btn_loop, &style_ctrl_btn_pressed_2, LV_STATE_PRESSED);
+
+    lbl_loop = lv_label_create(btn_loop);
+    lv_label_set_text(lbl_loop, LV_SYMBOL_LOOP);
+    lv_obj_center(lbl_loop);
+    lv_obj_set_style_text_opa(lbl_loop, LV_OPA_40, 0);
+
+    lv_obj_add_event_cb(btn_loop, cb_btn_loop, LV_EVENT_CLICKED, NULL);
 
     // ============================================================
     // Song name — chữ chạy vòng nếu quá dài
